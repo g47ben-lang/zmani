@@ -1,0 +1,12 @@
+# Downloaded audio — never commit these
+downloads/
+*.mp3
+*.m4a
+*.webp
+*.part
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
