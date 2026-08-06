@@ -10,3 +10,5 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+cookies.txt
+yt_cookies.txt
