@@ -103,6 +103,12 @@ def _try_download(query: str, out_dir: Path, quality: str) -> Path | None:
     if extra:
         cmd += ["--extractor-args", extra]
 
+    # A cookies.txt (Netscape format) lets yt-dlp pass YouTube's bot check.
+    # Point YTDLP_COOKIES at the file to enable it.
+    cookies = os.environ.get("YTDLP_COOKIES")
+    if cookies and Path(cookies).exists():
+        cmd += ["--cookies", cookies]
+
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         err = (result.stderr or "").strip().splitlines()
