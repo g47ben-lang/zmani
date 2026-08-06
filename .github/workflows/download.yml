@@ -51,23 +51,28 @@ jobs:
         env:
           SEND_HOST: ${{ github.event.inputs.send_host || 'https://send.magicode.me/' }}
           SOURCES: "yt,sc"
+          DEBUG_SOURCES: "1"
         run: |
           set -o pipefail
           python3 download_songs.py --list songs.txt --link --keep \
             --send-host "$SEND_HOST" 2>&1 | tee run.log
-          LINK=$(grep -oiE 'https?://[^ ]*(magicode|0x0)[^ ]*' run.log | tail -1 || true)
-          if [ -z "$LINK" ]; then
-            LINK=$(grep -i 'DOWNLOAD LINK' run.log | grep -oE 'https?://[^ ]+' | tail -1 || true)
-          fi
-          echo "link=$LINK" >> "$GITHUB_OUTPUT"
+          # Collect every share link the script produced (one per service).
+          grep -oE 'https?://[^ ]+' run.log \
+            | grep -viE 'github\.com|yt-dlp|soundcloud|youtube|litterbox\.catbox\.moe/resources' \
+            | sort -u > links.txt || true
+          echo "links<<EOF" >> "$GITHUB_OUTPUT"
+          cat links.txt >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
 
-      - name: Publish link to summary
+      - name: Publish links to summary
         if: always()
         run: |
-          echo "## 🎵 Download link" >> "$GITHUB_STEP_SUMMARY"
-          if [ -n "${{ steps.run.outputs.link }}" ]; then
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "**${{ steps.run.outputs.link }}**" >> "$GITHUB_STEP_SUMMARY"
+          echo "## 🎵 Download links" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ -s links.txt ]; then
+            while read -r u; do
+              [ -n "$u" ] && echo "- $u" >> "$GITHUB_STEP_SUMMARY"
+            done < links.txt
           else
             echo "No link produced — check the log above." >> "$GITHUB_STEP_SUMMARY"
           fi

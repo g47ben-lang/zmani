@@ -141,6 +141,9 @@ def download_song(song: str, out_dir: Path, quality: str) -> Path | None:
             return outcome
         if isinstance(outcome, _Fail):
             last_err = str(outcome)
+            # Surface why a source failed (helps diagnose YouTube bot-checks).
+            if os.environ.get("DEBUG_SOURCES"):
+                print(f"     ({label} failed: {last_err})")
 
     print(f"  [x] failed on all sources: {song}")
     if last_err:
@@ -172,40 +175,64 @@ def _extract_url(text: str) -> str | None:
     return match.group(0).rstrip(".,) ") if match else None
 
 
-def upload_link(zip_path: Path, send_host: str | None) -> str | None:
+def _curl(args: list[str]) -> tuple[int, str, str]:
+    r = subprocess.run(["curl", "-s", "--max-time", "300", *args],
+                       capture_output=True, text=True)
+    return r.returncode, r.stdout, r.stderr
+
+
+def upload_link(zip_path: Path, send_host: str | None) -> list[tuple[str, str]]:
     """
-    Upload a zip and return a shareable download URL.
-    Prefers a Send instance via ffsend; falls back to 0x0.st via curl.
+    Upload the zip to several file-share services and return every
+    (service_name, url) that succeeded. We try multiple because which sites
+    are reachable depends on the user's network (some ISPs filter aggressively);
+    the user picks whichever link opens for them.
     """
-    # Preferred: a "Send" instance (e.g. send.magicode.me) via ffsend.
+    zp = str(zip_path)
+    links: list[tuple[str, str]] = []
+
+    def add(name: str, url: str | None):
+        if url and url.startswith("http"):
+            links.append((name, url))
+            print(f"  [ok] {name}: {url}")
+
+    if not shutil.which("curl"):
+        print("  [x] curl not available; cannot upload.")
+        return links
+
+    # 1) litterbox (catbox) — up to 1 GB, 72h, plain URL in the body.
+    print(f"  -> uploading {zip_path.name} to litterbox ...")
+    rc, out, _ = _curl(["-F", "reqtype=fileupload", "-F", "time=72h",
+                        "-F", f"fileToUpload=@{zp}",
+                        "https://litterbox.catbox.moe/resources/internals/api.php"])
+    if rc == 0:
+        add("litterbox", _extract_url(out))
+
+    # 2) 0x0.st — needs a custom User-Agent or it 403s.
+    print(f"  -> uploading {zip_path.name} to 0x0.st ...")
+    rc, out, _ = _curl(["-A", "music-dl/1.0", "-F", f"file=@{zp}", "https://0x0.st"])
+    if rc == 0:
+        add("0x0.st", _extract_url(out))
+
+    # 3) bashupload.com — plain PUT, returns a wget URL in the body.
+    print(f"  -> uploading {zip_path.name} to bashupload ...")
+    rc, out, _ = _curl(["--upload-file", zp, "https://bashupload.com/songs.zip"])
+    if rc == 0:
+        add("bashupload", _extract_url(out))
+
+    # 4) A "Send" instance (e.g. send.magicode.me) via ffsend, if available.
     if send_host and shutil.which("ffsend"):
-        print(f"  -> uploading {zip_path.name} to {send_host} (ffsend)")
-        r = subprocess.run(
-            ["ffsend", "upload", "--host", send_host, str(zip_path)],
-            capture_output=True, text=True,
-        )
-        url = _extract_url(r.stdout) or _extract_url(r.stderr)
-        if r.returncode == 0 and url:
-            return url
-        print("  [!] ffsend upload failed; falling back to 0x0.st")
-        if r.stderr.strip():
-            print(f"      {r.stderr.strip().splitlines()[-1]}")
+        print(f"  -> uploading {zip_path.name} to {send_host} (ffsend) ...")
+        env = {**os.environ, "FFSEND_HOST": send_host}
+        r = subprocess.run(["ffsend", "upload", "--host", send_host, zp],
+                           capture_output=True, text=True, env=env)
+        add("magicode", _extract_url(r.stdout) or _extract_url(r.stderr))
+        if not (_extract_url(r.stdout) or _extract_url(r.stderr)) and r.stderr.strip():
+            print(f"      (ffsend: {r.stderr.strip().splitlines()[-1]})")
 
-    # Fallback: 0x0.st via curl (simple, no extra tooling).
-    if shutil.which("curl"):
-        print(f"  -> uploading {zip_path.name} to 0x0.st (curl)")
-        r = subprocess.run(
-            ["curl", "-s", "-F", f"file=@{zip_path}", "https://0x0.st"],
-            capture_output=True, text=True,
-        )
-        url = _extract_url(r.stdout)
-        if r.returncode == 0 and url:
-            return url
-        print("  [x] 0x0.st upload failed.")
-        return None
-
-    print("  [x] No usable uploader (install ffsend, or curl for the fallback).")
-    return None
+    if not links:
+        print("  [x] All upload services failed.")
+    return links
 
 
 def main() -> int:
@@ -269,12 +296,12 @@ def main() -> int:
         else:
             print("[!] bulk upload failed; local files kept.")
 
-    # Zip everything and produce a shareable download link.
-    share_link: str | None = None
+    # Zip everything and produce shareable download links.
+    share_links: list[tuple[str, str]] = []
     if args.link and downloaded:
         print(f"\nZipping {len(downloaded)} file(s) ...")
         zip_path = make_zip(downloaded, args.zip_name, out_dir)
-        share_link = upload_link(zip_path, args.send_host)
+        share_links = upload_link(zip_path, args.send_host)
         if not args.keep:
             zip_path.unlink(missing_ok=True)
             for p in downloaded:
@@ -285,8 +312,11 @@ def main() -> int:
     print(f"Done. {len(downloaded)} succeeded, {len(failed)} failed.")
     if args.remote:
         print(f"Uploaded to: {args.remote}")
-    elif share_link:
-        print(f"\n  >>> DOWNLOAD LINK: {share_link}\n")
+    elif share_links:
+        print("\n  >>> DOWNLOAD LINKS (open whichever works on your network):")
+        for name, url in share_links:
+            print(f"      [{name}] {url}")
+        print("")
     elif args.link:
         print("[!] Could not produce a download link (see errors above).")
     else:

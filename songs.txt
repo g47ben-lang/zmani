@@ -1,9 +1,4 @@
-# Song list — one song per line.
-# Lines starting with '#' and blank lines are ignored.
-# Best results: write "Artist - Song title". You can add "official audio"
-# to a line to push toward the audio version instead of a video/live clip.
-#
-# Examples (replace with your own):
-Idan Raichel - Mimaamakim
-Hadag Nachash - Zman Lehitorer
-Rita - Shvil Habricha
+# TEST list — 3 Ehud Banai songs to validate source quality + links.
+אהוד בנאי - עיר מקלט
+אהוד בנאי - קרוב
+אהוד בנאי - רסיסי לילה
