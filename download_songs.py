@@ -4,33 +4,48 @@ download_songs.py
 =================
 
 Take a list of song names, search each one on YouTube, download the audio as
-MP3, and (optionally) upload the results straight to a cloud folder via rclone
-(e.g. Google Drive). Nothing is meant to live on your local machine long-term:
-run it on a server / cloud box, let it push the files to your Drive, and grab
-them from there.
+MP3, and hand you the results one of two ways:
+
+  1. --remote : upload straight to a cloud folder via rclone (e.g. Google Drive)
+  2. --link   : zip everything and upload to a file-share that returns a
+                download link (a "Send" instance via ffsend, or 0x0.st)
+
+Nothing is meant to live on your local machine long-term: run it on a server /
+cloud box and grab the result from Drive or the link.
 
 Usage:
-    python3 download_songs.py --list songs.txt --out ./downloads \
-        --remote gdrive:Music
+    # Google Drive:
+    python3 download_songs.py --list songs.txt --remote gdrive:Music
+
+    # Zip + shareable link (e.g. a Send instance like send.magicode.me):
+    python3 download_songs.py --list songs.txt --link \
+        --send-host https://send.magicode.me/
 
 Arguments:
-    --list     Path to a text file with one song per line. Blank lines and
-               lines starting with '#' are ignored.
-    --out      Local folder to download into (temporary). Default: ./downloads
-    --remote   rclone remote + folder to upload to, e.g. "gdrive:Music".
-               Omit to only download locally without uploading.
-    --quality  MP3 quality for ffmpeg (0 = best, 9 = smallest). Default: 0
-    --keep     Keep local files after a successful upload (default: delete).
-    --upload-each  Upload each song right after it downloads instead of once
-               at the end (safer for long lists / flaky connections).
+    --list      Path to a text file with one song per line. Blank lines and
+                lines starting with '#' are ignored.
+    --out       Local folder to download into (temporary). Default: ./downloads
+    --remote    rclone remote + folder to upload to, e.g. "gdrive:Music".
+    --link      Zip the downloads and upload to a file-share; print the link.
+    --send-host A "Send" host used by --link (via ffsend), e.g.
+                "https://send.magicode.me/". Falls back to 0x0.st if ffsend
+                is missing or the upload fails. Env: SEND_HOST.
+    --zip-name  Name of the zip file created by --link. Default: songs.zip
+    --quality   MP3 quality for ffmpeg (0 = best, 9 = smallest). Default: 0
+    --keep      Keep local files after a successful upload (default: delete).
+    --upload-each  Upload each song right after it downloads (rclone only).
 
-Requirements: yt-dlp, ffmpeg, and (for uploading) rclone. See README.md.
+Requirements: yt-dlp, ffmpeg; rclone (for --remote); ffsend (for --link,
+optional). See README.md.
 """
 
 import argparse
+import os
+import re
 import shutil
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 
@@ -110,14 +125,71 @@ def upload(path: Path, remote: str) -> bool:
     return subprocess.run(cmd).returncode == 0
 
 
+def make_zip(files: list[Path], zip_name: str, out_dir: Path) -> Path:
+    """Bundle the downloaded files into a single zip and return its path."""
+    zip_path = out_dir.parent / zip_name
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for f in files:
+            zf.write(f, f.name)  # store by basename, no folder structure
+    size_mb = zip_path.stat().st_size / (1024 * 1024)
+    print(f"  -> created {zip_path.name} ({size_mb:.1f} MB)")
+    return zip_path
+
+
+def _extract_url(text: str) -> str | None:
+    """Pull the first http(s) URL out of a tool's output."""
+    match = re.search(r"https?://\S+", text or "")
+    return match.group(0).rstrip(".,) ") if match else None
+
+
+def upload_link(zip_path: Path, send_host: str | None) -> str | None:
+    """
+    Upload a zip and return a shareable download URL.
+    Prefers a Send instance via ffsend; falls back to 0x0.st via curl.
+    """
+    # Preferred: a "Send" instance (e.g. send.magicode.me) via ffsend.
+    if send_host and shutil.which("ffsend"):
+        print(f"  -> uploading {zip_path.name} to {send_host} (ffsend)")
+        r = subprocess.run(
+            ["ffsend", "upload", "--host", send_host, str(zip_path)],
+            capture_output=True, text=True,
+        )
+        url = _extract_url(r.stdout) or _extract_url(r.stderr)
+        if r.returncode == 0 and url:
+            return url
+        print("  [!] ffsend upload failed; falling back to 0x0.st")
+        if r.stderr.strip():
+            print(f"      {r.stderr.strip().splitlines()[-1]}")
+
+    # Fallback: 0x0.st via curl (simple, no extra tooling).
+    if shutil.which("curl"):
+        print(f"  -> uploading {zip_path.name} to 0x0.st (curl)")
+        r = subprocess.run(
+            ["curl", "-s", "-F", f"file=@{zip_path}", "https://0x0.st"],
+            capture_output=True, text=True,
+        )
+        url = _extract_url(r.stdout)
+        if r.returncode == 0 and url:
+            return url
+        print("  [x] 0x0.st upload failed.")
+        return None
+
+    print("  [x] No usable uploader (install ffsend, or curl for the fallback).")
+    return None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Download songs and upload to a cloud folder.")
     parser.add_argument("--list", required=True, help="Text file with one song per line.")
     parser.add_argument("--out", default="./downloads", help="Local download folder.")
     parser.add_argument("--remote", default=None, help='rclone remote:folder, e.g. "gdrive:Music".')
+    parser.add_argument("--link", action="store_true", help="Zip downloads and print a share link.")
+    parser.add_argument("--send-host", default=os.environ.get("SEND_HOST"),
+                        help='Send host for --link, e.g. "https://send.magicode.me/".')
+    parser.add_argument("--zip-name", default="songs.zip", help="Zip file name for --link.")
     parser.add_argument("--quality", default="0", help="MP3 quality 0 (best) - 9 (smallest).")
     parser.add_argument("--keep", action="store_true", help="Keep local files after upload.")
-    parser.add_argument("--upload-each", action="store_true", help="Upload each song right after download.")
+    parser.add_argument("--upload-each", action="store_true", help="Upload each song right after download (rclone only).")
     args = parser.parse_args()
 
     require_tool("yt-dlp")
@@ -167,11 +239,26 @@ def main() -> int:
         else:
             print("[!] bulk upload failed; local files kept.")
 
+    # Zip everything and produce a shareable download link.
+    share_link: str | None = None
+    if args.link and downloaded:
+        print(f"\nZipping {len(downloaded)} file(s) ...")
+        zip_path = make_zip(downloaded, args.zip_name, out_dir)
+        share_link = upload_link(zip_path, args.send_host)
+        if not args.keep:
+            zip_path.unlink(missing_ok=True)
+            for p in downloaded:
+                p.unlink(missing_ok=True)
+
     # Summary
     print("\n" + "=" * 50)
     print(f"Done. {len(downloaded)} succeeded, {len(failed)} failed.")
     if args.remote:
         print(f"Uploaded to: {args.remote}")
+    elif share_link:
+        print(f"\n  >>> DOWNLOAD LINK: {share_link}\n")
+    elif args.link:
+        print("[!] Could not produce a download link (see errors above).")
     else:
         print(f"Files are in: {out_dir.resolve()}")
     if failed:

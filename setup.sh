@@ -30,5 +30,21 @@ else
   curl -fsSL https://rclone.org/install.sh | sudo bash
 fi
 
+echo "==> Installing ffsend (for --link uploads to a Send instance)"
+if command -v ffsend >/dev/null 2>&1; then
+  echo "    ffsend already installed."
+else
+  FFSEND_URL="https://github.com/timvisee/ffsend/releases/download/v0.2.76/ffsend-v0.2.76-linux-x64-static"
+  if curl -fsSL "$FFSEND_URL" -o /tmp/ffsend 2>/dev/null; then
+    chmod +x /tmp/ffsend && sudo mv /tmp/ffsend /usr/local/bin/ffsend 2>/dev/null \
+      || mv /tmp/ffsend /usr/local/bin/ffsend 2>/dev/null \
+      || echo "    Could not place ffsend on PATH; move /tmp/ffsend manually."
+  else
+    echo "    Could not download ffsend (Linux x64 only). --link will fall back to 0x0.st."
+  fi
+fi
+
 echo ""
-echo "Done. Next: configure Google Drive with 'rclone config' (see README.md)."
+echo "Done."
+echo "  * Link flow:   python3 download_songs.py --list songs.txt --link --send-host https://send.magicode.me/"
+echo "  * Drive flow:  configure with 'rclone config' first (see README.md)."

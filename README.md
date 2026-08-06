@@ -1,8 +1,45 @@
-# 🎵 הורדת שירים והעלאה ל-Google Drive
+# 🎵 הורדת שירים בענן → קישור להורדה / Google Drive
 
-סקריפט שמקבל **רשימת שמות שירים**, מחפש כל אחד ב-YouTube, מוריד את השמע כ-MP3,
-ומעלה אוטומטית לתיקייה ב-**Google Drive**. הרעיון: להריץ אותו על שרת / בענן —
-הקבצים לא נשמרים אצלך במחשב, הם עולים ישר ל-Drive ומשם אתה מוריד מה שבא לך.
+מקבל **רשימת שמות שירים**, מחפש כל אחד ב-YouTube, מוריד את השמע כ-MP3, ומספק
+לך אותם באחת משתי דרכים — **קישור הורדה לזיפ** או תיקייה ב-**Google Drive**.
+הכל רץ בענן: הקבצים לא נשמרים אצלך במחשב.
+
+---
+
+## ⭐ הדרך הכי פשוטה: Google Colab (בלי להתקין כלום)
+
+לא צריך מחשב חזק או התקנות — הכל בדפדפן, חינם:
+
+1. פתח את המחברת בלחיצה אחת:
+   👉 **https://colab.research.google.com/github/g47ben-lang/zmani/blob/claude/music-upload-script-ebrvui/music_downloader_colab.ipynb**
+2. בתא השני — הדבק את רשימת השירים שלך (שיר בכל שורה).
+3. תפריט **Runtime → Run all** (או הרץ תא-תא בכפתור ▶).
+4. בסוף מודפס **קישור הורדה** לזיפ עם כל השירים. זהו.
+
+הזיפ עולה ל-`send.magicode.me` (ואם זה נופל — אוטומטית ל-`0x0.st`).
+
+> אם YouTube מבקש אימות בשרתי הענן ("Sign in to confirm…"), נסה שוב מאוחר
+> יותר — זה קורה לפעמים ל-IP-ים של Colab.
+
+---
+
+## אופציה ב': קישור הורדה משרת משלך (בלי Google Drive)
+
+אותה תוצאה בלי המחברת — על כל שרת/Codespace עם `python3`:
+
+```bash
+./setup.sh
+python3 download_songs.py --list songs.txt --link \
+    --send-host https://send.magicode.me/
+```
+
+בסוף מודפס `>>> DOWNLOAD LINK: ...`. צריך `ffsend` בשביל Send (setup.sh
+מנסה, אבל התקנה ידנית: הורד את הבינארי מ-
+https://github.com/timvisee/ffsend/releases). בלי ffsend — נופל ל-`0x0.st`.
+
+---
+
+## אופציה ג': Google Drive
 
 ---
 
