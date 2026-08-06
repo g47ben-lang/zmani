@@ -221,14 +221,20 @@ def upload_link(zip_path: Path, send_host: str | None) -> list[tuple[str, str]]:
         add("bashupload", _extract_url(out))
 
     # 4) A "Send" instance (e.g. send.magicode.me) via ffsend, if available.
+    #    Host is passed via FFSEND_HOST env (more reliable across versions than
+    #    the --host flag). Try a couple of invocations for compatibility.
     if send_host and shutil.which("ffsend"):
-        print(f"  -> uploading {zip_path.name} to {send_host} (ffsend) ...")
         env = {**os.environ, "FFSEND_HOST": send_host}
-        r = subprocess.run(["ffsend", "upload", "--host", send_host, zp],
-                           capture_output=True, text=True, env=env)
-        add("magicode", _extract_url(r.stdout) or _extract_url(r.stderr))
-        if not (_extract_url(r.stdout) or _extract_url(r.stderr)) and r.stderr.strip():
-            print(f"      (ffsend: {r.stderr.strip().splitlines()[-1]})")
+        for cmd in (["ffsend", "upload", "--yes", zp],
+                    ["ffsend", "upload", "--host", send_host, zp]):
+            print(f"  -> uploading {zip_path.name} to {send_host} (ffsend) ...")
+            r = subprocess.run(cmd, capture_output=True, text=True, env=env)
+            url = _extract_url(r.stdout) or _extract_url(r.stderr)
+            if url:
+                add("magicode", url)
+                break
+            if r.stderr.strip():
+                print(f"      (ffsend: {r.stderr.strip().splitlines()[-1]})")
 
     if not links:
         print("  [x] All upload services failed.")
