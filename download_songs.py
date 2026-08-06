@@ -69,18 +69,23 @@ def require_tool(name: str) -> None:
         )
 
 
-def download_song(song: str, out_dir: Path, quality: str) -> Path | None:
-    """
-    Search YouTube for `song` and download the first result as MP3.
-    Returns the path to the created file, or None on failure.
-    """
-    # A predictable output name so we can find the file afterwards.
-    # yt-dlp fills in the real title; %(ext)s becomes mp3 after extraction.
+# Search "engines" tried in order. YouTube has the best catalogue but blocks
+# datacenter IPs with a bot check; SoundCloud is a resilient fallback that
+# does not block cloud runners. Override with the SOURCES env var, e.g.
+# SOURCES="yt,sc" (default) or SOURCES="sc" to skip YouTube entirely.
+SEARCH_PREFIXES = {
+    "yt": "ytsearch1:",   # YouTube
+    "sc": "scsearch1:",   # SoundCloud
+}
+
+
+def _try_download(query: str, out_dir: Path, quality: str) -> Path | None:
+    """Run yt-dlp for a single search query. Returns the file path or None."""
     out_template = str(out_dir / "%(title)s [%(id)s].%(ext)s")
 
     cmd = [
         "yt-dlp",
-        f"ytsearch1:{song}",        # take the top YouTube search result
+        query,
         "--no-playlist",
         "--extract-audio",
         "--audio-format", "mp3",
@@ -92,30 +97,55 @@ def download_song(song: str, out_dir: Path, quality: str) -> Path | None:
         "--no-warnings",
         "--quiet",
     ]
+    # Extra yt-dlp extractor args (e.g. a PO-token / player_client tweak) can be
+    # injected without touching the code, via the env var below.
+    extra = os.environ.get("YTDLP_EXTRACTOR_ARGS")
+    if extra:
+        cmd += ["--extractor-args", extra]
 
-    print(f"  -> searching & downloading: {song}")
     result = subprocess.run(cmd, capture_output=True, text=True)
-
     if result.returncode != 0:
-        print(f"  [x] failed: {song}")
         err = (result.stderr or "").strip().splitlines()
-        if err:
-            print(f"      {err[-1]}")
-        return None
+        return None if not err else (_Fail(err[-1]))  # carry last error line
 
-    # The printed filepath is the last non-empty stdout line.
     lines = [ln.strip() for ln in result.stdout.splitlines() if ln.strip()]
     if not lines:
-        print(f"  [x] downloaded but could not locate file: {song}")
         return None
-
     path = Path(lines[-1])
-    if not path.exists():
-        print(f"  [x] reported file missing: {path}")
-        return None
+    return path if path.exists() else None
 
-    print(f"  [ok] {path.name}")
-    return path
+
+class _Fail(str):
+    """A str subclass used to signal 'failed with this error message'."""
+    __slots__ = ()
+
+
+def download_song(song: str, out_dir: Path, quality: str) -> Path | None:
+    """
+    Search each configured source (YouTube, then SoundCloud) for `song` and
+    download the first result as MP3. Returns the file path, or None if every
+    source failed.
+    """
+    order = [s.strip() for s in os.environ.get("SOURCES", "yt,sc").split(",") if s.strip()]
+    last_err = ""
+
+    for src in order:
+        prefix = SEARCH_PREFIXES.get(src)
+        if not prefix:
+            continue
+        label = {"yt": "YouTube", "sc": "SoundCloud"}.get(src, src)
+        print(f"  -> searching {label}: {song}")
+        outcome = _try_download(f"{prefix}{song}", out_dir, quality)
+        if isinstance(outcome, Path):
+            print(f"  [ok] {outcome.name}  (via {label})")
+            return outcome
+        if isinstance(outcome, _Fail):
+            last_err = str(outcome)
+
+    print(f"  [x] failed on all sources: {song}")
+    if last_err:
+        print(f"      {last_err}")
+    return None
 
 
 def upload(path: Path, remote: str) -> bool:

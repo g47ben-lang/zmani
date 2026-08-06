@@ -29,16 +29,28 @@ jobs:
 
       - name: Install tools
         run: |
-          python3 -m pip install --upgrade yt-dlp
+          # yt-dlp + the PO-token provider plugin (helps bypass YouTube's
+          # "confirm you're not a bot" check on datacenter IPs).
+          python3 -m pip install --upgrade yt-dlp bgutil-ytdlp-pot-provider
           sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
           curl -fsSL https://github.com/timvisee/ffsend/releases/download/v0.2.76/ffsend-v0.2.76-linux-x64-static \
             -o /usr/local/bin/ffsend && chmod +x /usr/local/bin/ffsend
           echo "yt-dlp $(yt-dlp --version) | ffmpeg $(ffmpeg -version | head -1) | ffsend ok"
 
+      - name: Start PO-token provider (for YouTube)
+        run: |
+          # Runs the bgutil provider on localhost:4416; yt-dlp auto-detects it
+          # and uses it to generate PO tokens. Best-effort — SoundCloud is the
+          # fallback if this doesn't fully unblock YouTube.
+          docker run --name bgutil -d -p 4416:4416 brainicism/bgutil-ytdlp-pot-provider || \
+            echo "PO-token provider unavailable; relying on SoundCloud fallback."
+          sleep 5
+
       - name: Download, zip and upload
         id: run
         env:
           SEND_HOST: ${{ github.event.inputs.send_host || 'https://send.magicode.me/' }}
+          SOURCES: "yt,sc"
         run: |
           set -o pipefail
           python3 download_songs.py --list songs.txt --link --keep \
