@@ -1,0 +1,94 @@
+name: Download songs from issue
+
+# Self-service: open an issue (labeled "songs") whose body is a list of song
+# names, one per line. This downloads them from YouTube, zips them, uploads the
+# zip as an artifact, and comments back on the issue with the download link.
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  download:
+    # Only run for issues opened by the repo owner and labeled "songs" — this
+    # keeps random visitors from triggering downloads on a public repo.
+    if: >-
+      github.event.issue.user.login == github.repository_owner &&
+      contains(github.event.issue.labels.*.name, 'songs')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Acknowledge (comment "started")
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          gh issue comment "${{ github.event.issue.number }}" \
+            --body "⏳ התחלתי להוריד את השירים… זה ייקח כמה דקות. מעקב: $RUN_URL"
+
+      - name: Build song list from the issue body
+        run: |
+          jq -r '.issue.body' "$GITHUB_EVENT_PATH" | tr -d '\r' > songs.txt
+          echo "----- songs.txt -----"
+          grep -vE '^\s*(#|$)' songs.txt | sed -n '1,10p' || true
+          COUNT=$(grep -cvE '^\s*(#|$)' songs.txt || echo 0)
+          echo "song_count=$COUNT" >> "$GITHUB_ENV"
+
+      - name: Install tools
+        run: |
+          python3 -m pip install --upgrade yt-dlp
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg zip
+
+      - name: Decrypt YouTube cookies
+        env:
+          COOKIES_KEY: ${{ secrets.COOKIES_KEY }}
+        run: |
+          if [ -z "$COOKIES_KEY" ]; then
+            echo "::error::COOKIES_KEY secret is not set."; exit 1
+          fi
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
+            -pass pass:"$COOKIES_KEY" -in cookies.enc -out cookies.txt
+
+      - name: Download songs (YouTube)
+        env:
+          SOURCES: "yt"
+          YTDLP_COOKIES: "cookies.txt"
+          DEBUG_SOURCES: "1"
+        run: |
+          python3 download_songs.py --list songs.txt --out ./downloads 2>&1 | tee run.log || true
+          rm -f cookies.txt
+
+      - name: Zip results
+        run: |
+          cd downloads && zip -r -0 ../songs.zip . && cd ..
+          ls -la songs.zip || echo "no zip"
+
+      - name: Upload songs.zip artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: songs
+          path: songs.zip
+          if-no-files-found: ignore
+
+      - name: Comment result on the issue
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          OK=$(ls downloads/*.mp3 2>/dev/null | wc -l | tr -d ' ')
+          FAIL=$(grep -c 'failed on all sources' run.log 2>/dev/null || echo 0)
+          if [ "${OK:-0}" -gt 0 ]; then
+            gh issue comment "${{ github.event.issue.number }}" --body "$(printf '✅ מוכן! ירדו %s שירים (%s נכשלו).\n\n**להורדה:** פתח את הקישור, גלול למטה ל-**Artifacts** והורד את `songs.zip`:\n%s\n\nאפשר לסגור את ה-Issue.' "$OK" "$FAIL" "$RUN_URL")"
+          else
+            gh issue comment "${{ github.event.issue.number }}" --body "$(printf '⚠️ לא ירד אף שיר. בדוק את הרשימה או צפה בפירוט כאן: %s' "$RUN_URL")"
+          fi
