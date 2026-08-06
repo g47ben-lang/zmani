@@ -39,14 +39,14 @@ jobs:
             echo "no cookies configured; continuing without"
           fi
 
-      - name: Download songs (YouTube via proxy)
+      - name: Download songs (YouTube)
         env:
           SOURCES: "yt"
           YTDLP_PROXY: ${{ secrets.PROXY_URL }}
           YTDLP_COOKIES: "cookies.txt"
+          YTDLP_EXTRACTOR_ARGS: "youtube:player_client=tv,web_safari,mweb,default"
           DEBUG_SOURCES: "1"
         run: |
-          if [ -z "$YTDLP_PROXY" ]; then echo "::error::PROXY_URL secret is not set."; exit 1; fi
           python3 download_songs.py --list songs.txt --out ./downloads 2>&1 | tee run.log || true
           rm -f cookies.txt
 
