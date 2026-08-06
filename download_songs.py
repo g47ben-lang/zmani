@@ -109,6 +109,12 @@ def _try_download(query: str, out_dir: Path, quality: str) -> Path | None:
     if cookies and Path(cookies).exists():
         cmd += ["--cookies", cookies]
 
+    # Route through a proxy (e.g. a residential proxy so YouTube treats the
+    # request as a normal home user). Format: http://user:pass@host:port
+    proxy = os.environ.get("YTDLP_PROXY")
+    if proxy:
+        cmd += ["--proxy", proxy]
+
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         err = (result.stderr or "").strip().splitlines()

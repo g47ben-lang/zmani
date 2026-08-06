@@ -1,8 +1,8 @@
 name: Download songs
 
-# Downloads the songs from YouTube using an authenticated cookies file
-# (decrypted at runtime from cookies.enc via the COOKIES_KEY secret), zips
-# them, and uploads songs.zip as an artifact to grab from the run page.
+# Downloads songs from YouTube through a residential proxy (so YouTube treats
+# the request like a normal home user), zips them, and uploads songs.zip as an
+# artifact. Cookies are used too when available for extra reliability.
 on:
   workflow_dispatch:
   push:
@@ -24,36 +24,31 @@ jobs:
 
       - name: Install tools
         run: |
-          python3 -m pip install --upgrade yt-dlp bgutil-ytdlp-pot-provider
+          python3 -m pip install --upgrade yt-dlp
           sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg zip
 
-      - name: Start PO-token provider
-        run: |
-          # Cookies get us past the bot check; the PO token unlocks the media
-          # format URLs ("Requested format is not available" without it).
-          docker run --name bgutil -d -p 4416:4416 brainicism/bgutil-ytdlp-pot-provider
-          sleep 15
-
-      - name: Decrypt YouTube cookies
+      - name: Decrypt YouTube cookies (optional)
         env:
           COOKIES_KEY: ${{ secrets.COOKIES_KEY }}
         run: |
-          if [ -z "$COOKIES_KEY" ]; then
-            echo "::error::COOKIES_KEY secret is not set."; exit 1
+          if [ -n "$COOKIES_KEY" ] && [ -f cookies.enc ]; then
+            openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
+              -pass pass:"$COOKIES_KEY" -in cookies.enc -out cookies.txt \
+              && echo "cookies ready" || echo "cookie decrypt failed; continuing without"
+          else
+            echo "no cookies configured; continuing without"
           fi
-          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
-            -pass pass:"$COOKIES_KEY" -in cookies.enc -out cookies.txt
-          echo "Decrypted cookies: $(wc -l < cookies.txt) lines."
 
-      - name: Download songs (YouTube)
+      - name: Download songs (YouTube via proxy)
         env:
           SOURCES: "yt"
+          YTDLP_PROXY: ${{ secrets.PROXY_URL }}
           YTDLP_COOKIES: "cookies.txt"
           DEBUG_SOURCES: "1"
         run: |
-          # Don't fail the whole job if some individual songs fail.
+          if [ -z "$YTDLP_PROXY" ]; then echo "::error::PROXY_URL secret is not set."; exit 1; fi
           python3 download_songs.py --list songs.txt --out ./downloads 2>&1 | tee run.log || true
-          rm -f cookies.txt   # never keep the decrypted cookies around
+          rm -f cookies.txt
 
       - name: Zip results
         run: |
