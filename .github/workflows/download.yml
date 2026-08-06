@@ -1,0 +1,69 @@
+name: Download songs
+
+# Runs on GitHub's servers (free internet). Triggers whenever songs.txt is
+# pushed, or manually from the Actions tab. It downloads every song, zips them,
+# uploads to a Send instance, and prints the download link in the run summary.
+on:
+  push:
+    branches:
+      - claude/music-upload-script-ebrvui
+    paths:
+      - songs.txt
+      - .github/workflows/download.yml
+  workflow_dispatch:
+    inputs:
+      send_host:
+        description: "Send host for the download link"
+        default: "https://send.magicode.me/"
+        required: false
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install tools
+        run: |
+          python3 -m pip install --upgrade yt-dlp
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+          curl -fsSL https://github.com/timvisee/ffsend/releases/download/v0.2.76/ffsend-v0.2.76-linux-x64-static \
+            -o /usr/local/bin/ffsend && chmod +x /usr/local/bin/ffsend
+          echo "yt-dlp $(yt-dlp --version) | ffmpeg $(ffmpeg -version | head -1) | ffsend ok"
+
+      - name: Download, zip and upload
+        id: run
+        env:
+          SEND_HOST: ${{ github.event.inputs.send_host || 'https://send.magicode.me/' }}
+        run: |
+          set -o pipefail
+          python3 download_songs.py --list songs.txt --link --keep \
+            --send-host "$SEND_HOST" 2>&1 | tee run.log
+          LINK=$(grep -oiE 'https?://[^ ]*(magicode|0x0)[^ ]*' run.log | tail -1 || true)
+          if [ -z "$LINK" ]; then
+            LINK=$(grep -i 'DOWNLOAD LINK' run.log | grep -oE 'https?://[^ ]+' | tail -1 || true)
+          fi
+          echo "link=$LINK" >> "$GITHUB_OUTPUT"
+
+      - name: Publish link to summary
+        if: always()
+        run: |
+          echo "## 🎵 Download link" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "${{ steps.run.outputs.link }}" ]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "**${{ steps.run.outputs.link }}**" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No link produced — check the log above." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload zip as artifact (backup)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: songs
+          path: songs.zip
+          if-no-files-found: ignore
