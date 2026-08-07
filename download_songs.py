@@ -41,8 +41,10 @@ optional). See README.md.
 
 import argparse
 import os
+import random
 import re
 import shutil
+import string
 import subprocess
 import sys
 import zipfile
@@ -113,6 +115,11 @@ def _try_download(query: str, out_dir: Path, quality: str) -> Path | None:
     # request as a normal home user). Format: http://user:pass@host:port
     proxy = os.environ.get("YTDLP_PROXY")
     if proxy:
+        # For sticky-session residential proxies (e.g. Geonode's "session-XXXX"
+        # username), use a fresh session id per download so one stable IP serves
+        # the whole song — avoids mid-download "HTTP 403" from IP rotation.
+        rand = "".join(random.choices(string.ascii_lowercase + string.digits, k=8))
+        proxy = re.sub(r"(session-)[A-Za-z0-9]+", r"\g<1>" + rand, proxy)
         cmd += ["--proxy", proxy]
 
     result = subprocess.run(cmd, capture_output=True, text=True)

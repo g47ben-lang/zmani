@@ -38,7 +38,8 @@ jobs:
 
       - name: Zip results
         run: |
-          cd downloads && zip -r -0 ../songs.zip . && cd ..
+          # Only bundle the audio files — skip any leftover thumbnails/images.
+          cd downloads && (zip -0 ../songs.zip *.mp3 *.m4a *.opus 2>/dev/null || echo "no audio files") && cd ..
           ls -la songs.zip || echo "no zip (nothing downloaded)"
 
       - name: Upload songs.zip artifact
