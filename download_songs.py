@@ -81,8 +81,14 @@ SEARCH_PREFIXES = {
 }
 
 
-def _try_download(query: str, out_dir: Path, quality: str) -> Path | None:
-    """Run yt-dlp for a single search query. Returns the file path or None."""
+def _try_download(query: str, out_dir: Path, quality: str,
+                  video: bool = False, video_res: str | None = None) -> Path | None:
+    """Run yt-dlp for a single search query. Returns the file path or None.
+
+    In audio mode (default) the result is an MP3. In video mode (`video=True`)
+    the full video is downloaded and merged into a single MP4, optionally
+    capped at a max height via `video_res` (e.g. "1080").
+    """
     out_template = str(out_dir / "%(title)s [%(id)s].%(ext)s")
 
     cmd = [
@@ -92,11 +98,32 @@ def _try_download(query: str, out_dir: Path, quality: str) -> Path | None:
         "--retries", "8",
         "--fragment-retries", "8",
         "--extractor-retries", "3",
-        "--extract-audio",
-        "--audio-format", "mp3",
-        "--audio-quality", quality,
-        "--embed-thumbnail",        # nice-to-have: cover art (ignored if unsupported)
-        "--add-metadata",           # write title/artist tags
+    ]
+
+    if video:
+        # Grab the best video+audio and merge into one MP4 file. `video_res`
+        # caps the height so runs stay reasonably sized (e.g. 720/1080).
+        if video_res:
+            fmt = f"bv*[height<={video_res}]+ba/b[height<={video_res}]/bv*+ba/b"
+        else:
+            fmt = "bv*+ba/b"
+        cmd += [
+            "-f", fmt,
+            "--merge-output-format", "mp4",
+            "--remux-video", "mp4",     # remux (no re-encode) to mp4 when possible
+            "--embed-thumbnail",
+            "--embed-metadata",
+        ]
+    else:
+        cmd += [
+            "--extract-audio",
+            "--audio-format", "mp3",
+            "--audio-quality", quality,
+            "--embed-thumbnail",        # nice-to-have: cover art (ignored if unsupported)
+            "--add-metadata",           # write title/artist tags
+        ]
+
+    cmd += [
         "--output", out_template,
         "--print", "after_move:filepath",   # print the final file path
         "--no-warnings",
@@ -142,13 +169,17 @@ class _Fail(str):
     __slots__ = ()
 
 
-def download_song(song: str, out_dir: Path, quality: str) -> Path | None:
+def download_song(song: str, out_dir: Path, quality: str,
+                  video: bool = False, video_res: str | None = None) -> Path | None:
     """
     Search each configured source (YouTube, then SoundCloud) for `song` and
-    download the first result as MP3. Returns the file path, or None if every
-    source failed.
+    download the first result — as MP3 (default) or as a merged MP4 when
+    `video=True`. Returns the file path, or None if every source failed.
     """
     order = [s.strip() for s in os.environ.get("SOURCES", "yt,sc").split(",") if s.strip()]
+    # SoundCloud has no video; in video mode only search sources that carry it.
+    if video:
+        order = [s for s in order if s == "yt"] or ["yt"]
     last_err = ""
 
     for src in order:
@@ -157,7 +188,7 @@ def download_song(song: str, out_dir: Path, quality: str) -> Path | None:
             continue
         label = {"yt": "YouTube", "sc": "SoundCloud"}.get(src, src)
         print(f"  -> searching {label}: {song}")
-        outcome = _try_download(f"{prefix}{song}", out_dir, quality)
+        outcome = _try_download(f"{prefix}{song}", out_dir, quality, video, video_res)
         if isinstance(outcome, Path):
             print(f"  [ok] {outcome.name}  (via {label})")
             return outcome
@@ -273,6 +304,10 @@ def main() -> int:
                         help='Send host for --link, e.g. "https://send.magicode.me/".')
     parser.add_argument("--zip-name", default="songs.zip", help="Zip file name for --link.")
     parser.add_argument("--quality", default="0", help="MP3 quality 0 (best) - 9 (smallest).")
+    parser.add_argument("--video", action="store_true",
+                        help="Download the full video (MP4) instead of extracting audio.")
+    parser.add_argument("--video-res", default=os.environ.get("VIDEO_RES"),
+                        help='Cap video height, e.g. "720" or "1080" (video mode only).')
     parser.add_argument("--keep", action="store_true", help="Keep local files after upload.")
     parser.add_argument("--upload-each", action="store_true", help="Upload each song right after download (rclone only).")
     args = parser.parse_args()
@@ -290,17 +325,22 @@ def main() -> int:
     if not songs:
         sys.exit(f"[!] no songs found in {list_path}")
 
+    # Video mode can also be turned on via the VIDEO env var (=1/true/yes),
+    # so the workflow can toggle it without changing the command line.
+    video = args.video or os.environ.get("VIDEO", "").lower() in ("1", "true", "yes")
+
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"Found {len(songs)} song(s). Downloading into '{out_dir}'.\n")
+    kind = "video (MP4)" if video else "audio (MP3)"
+    print(f"Found {len(songs)} item(s). Downloading as {kind} into '{out_dir}'.\n")
 
     downloaded: list[Path] = []
     failed: list[str] = []
 
     for i, song in enumerate(songs, 1):
         print(f"[{i}/{len(songs)}] {song}")
-        path = download_song(song, out_dir, args.quality)
+        path = download_song(song, out_dir, args.quality, video, args.video_res)
         if path is None:
             failed.append(song)
             continue

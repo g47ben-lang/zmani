@@ -1,0 +1,46 @@
+name: "🎵 הורדה — שירים או סרטונים"
+description: "הדבק רשימה, בחר שיר (MP3) או סרטון (MP4), וקבל בתגובה קישור להורדה"
+title: "הורדה"
+labels: ["songs"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        מלא/י את השדות ולחץ/י **Submit new issue** למטה.
+        תוך כמה דקות תתקבל כאן תגובה עם קישור להורדת קובץ ZIP.
+
+  - type: dropdown
+    id: format
+    attributes:
+      label: "מה להוריד?"
+      description: "שיר = רק שמע (MP3). סרטון = הווידאו המלא (MP4)."
+      options:
+        - "🎵 שיר (MP3)"
+        - "🎬 סרטון (MP4)"
+      default: 0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: video_res
+    attributes:
+      label: "איכות וידאו (רלוונטי רק אם בחרת סרטון)"
+      options:
+        - "1080"
+        - "720"
+        - "480"
+      default: 0
+    validations:
+      required: false
+
+  - type: textarea
+    id: list
+    attributes:
+      label: "הרשימה — פריט אחד בכל שורה"
+      description: "הכי מדויק בפורמט: אמן - שם. שורות שמתחילות ב-# מתעלמים מהן."
+      placeholder: |
+        נעמי שמר - ירושלים של זהב
+        ישי ריבו - כל הדרך
+        חנן בן ארי - אלוף העולם
+    validations:
+      required: true
