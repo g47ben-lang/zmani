@@ -5,9 +5,19 @@ name: Download songs
 # uploads songs.zip as an artifact.
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "What to download"
+        type: choice
+        default: audio
+        options: [audio, video]
+      video_res:
+        description: "Max video height (video mode), e.g. 720 or 1080"
+        default: "1080"
   push:
     branches:
       - claude/music-upload-script-ebrvui
+      - claude/youtube-downloader-add-songs-njp0gy
     paths:
       - songs.txt
       - .github/workflows/download.yml
@@ -32,14 +42,17 @@ jobs:
           SOURCES: "yt"
           YTDLP_PROXY: ${{ secrets.PROXY_URL }}
           DEBUG_SOURCES: "1"
+          # workflow_dispatch lets you pick audio/video; a plain push defaults to audio.
+          VIDEO: ${{ github.event.inputs.mode == 'video' && '1' || '' }}
+          VIDEO_RES: ${{ github.event.inputs.video_res }}
         run: |
           if [ -z "$YTDLP_PROXY" ]; then echo "::error::PROXY_URL secret is not set."; exit 1; fi
           python3 download_songs.py --list songs.txt --out ./downloads 2>&1 | tee run.log || true
 
       - name: Zip results
         run: |
-          # Only bundle the audio files — skip any leftover thumbnails/images.
-          cd downloads && (zip -0 ../songs.zip *.mp3 *.m4a *.opus 2>/dev/null || echo "no audio files") && cd ..
+          # Bundle audio and/or video files — skip leftover thumbnails/images.
+          cd downloads && (zip -0 ../songs.zip *.mp3 *.m4a *.opus *.mp4 *.mkv *.webm 2>/dev/null || echo "no media files") && cd ..
           ls -la songs.zip || echo "no zip (nothing downloaded)"
 
       - name: Upload songs.zip artifact
