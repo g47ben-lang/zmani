@@ -1,8 +1,10 @@
 name: Download songs from issue
 
-# Self-service: open an issue (labeled "songs") whose body is a list of song
-# names, one per line. This downloads them from YouTube, zips them, uploads the
-# zip as an artifact, and comments back on the issue with the download link.
+# Self-service "website": open an issue with the "🎵 הורדה" form (label
+# "songs"), paste a list, and pick song (MP3) or video (MP4). This parses the
+# form, downloads the items from YouTube through the residential proxy
+# (PROXY_URL secret), zips them, uploads the zip as an artifact, and comments
+# back on the issue with the download link.
 on:
   issues:
     types: [opened]
@@ -32,43 +34,87 @@ jobs:
         run: |
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           gh issue comment "${{ github.event.issue.number }}" \
-            --body "⏳ התחלתי להוריד את השירים… זה ייקח כמה דקות. מעקב: $RUN_URL"
+            --body "⏳ התחלתי… זה ייקח כמה דקות. מעקב: $RUN_URL"
 
-      - name: Build song list from the issue body
+      - name: Parse the issue form (list + audio/video choice)
         run: |
-          jq -r '.issue.body' "$GITHUB_EVENT_PATH" | tr -d '\r' > songs.txt
-          echo "----- songs.txt -----"
-          grep -vE '^\s*(#|$)' songs.txt | sed -n '1,10p' || true
-          COUNT=$(grep -cvE '^\s*(#|$)' songs.txt || echo 0)
-          echo "song_count=$COUNT" >> "$GITHUB_ENV"
+          python3 - <<'PY'
+          import json, os, re
+
+          event = json.load(open(os.environ["GITHUB_EVENT_PATH"]))
+          body = (event["issue"]["body"] or "").replace("\r\n", "\n")
+
+          # Issue forms render as: "### <label>\n\n<value>\n\n### <label>...".
+          # Split into (heading -> value) sections. If there are no headings
+          # (an old plain-text issue), treat the whole body as the song list.
+          sections, cur, buf = {}, None, []
+          for line in body.split("\n"):
+              m = re.match(r"^###\s+(.*)", line)
+              if m:
+                  if cur is not None:
+                      sections[cur] = "\n".join(buf).strip()
+                  cur, buf = m.group(1).strip(), []
+              elif cur is not None:
+                  buf.append(line)
+          if cur is not None:
+              sections[cur] = "\n".join(buf).strip()
+
+          def find(keyword):
+              for k, v in sections.items():
+                  if keyword in k:
+                      return v
+              return ""
+
+          if sections:
+              fmt  = find("להוריד")                         # "מה להוריד?"
+              res  = find("איכות")                          # video resolution
+              lst  = find("הרשימה") or find("פריט") or ""    # the list textarea
+          else:
+              fmt, res, lst = "", "", body
+
+          video = ("סרטון" in fmt) or ("MP4" in fmt) or ("mp4" in fmt.lower())
+          res_digits = re.search(r"\d{3,4}", res)
+          res = res_digits.group(0) if res_digits else "1080"
+
+          # "_No response_" is what GitHub inserts for an empty optional field.
+          if lst.strip() == "_No response_":
+              lst = ""
+
+          with open("songs.txt", "w", encoding="utf-8") as f:
+              f.write(lst.strip() + "\n")
+
+          count = sum(1 for ln in lst.splitlines()
+                      if ln.strip() and not ln.strip().startswith("#"))
+
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
+              env.write(f"VIDEO={'1' if video else ''}\n")
+              env.write(f"VIDEO_RES={res}\n")
+              env.write(f"MODE={'video' if video else 'audio'}\n")
+              env.write(f"song_count={count}\n")
+
+          print(f"mode={'video' if video else 'audio'} res={res} count={count}")
+          print("----- first lines -----")
+          print("\n".join(lst.splitlines()[:10]))
+          PY
 
       - name: Install tools
         run: |
           python3 -m pip install --upgrade yt-dlp
           sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg zip
 
-      - name: Decrypt YouTube cookies
-        env:
-          COOKIES_KEY: ${{ secrets.COOKIES_KEY }}
-        run: |
-          if [ -z "$COOKIES_KEY" ]; then
-            echo "::error::COOKIES_KEY secret is not set."; exit 1
-          fi
-          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
-            -pass pass:"$COOKIES_KEY" -in cookies.enc -out cookies.txt
-
-      - name: Download songs (YouTube)
+      - name: Download (YouTube via residential proxy)
         env:
           SOURCES: "yt"
-          YTDLP_COOKIES: "cookies.txt"
+          YTDLP_PROXY: ${{ secrets.PROXY_URL }}
           DEBUG_SOURCES: "1"
+          # VIDEO / VIDEO_RES come from the parse step above (GITHUB_ENV).
         run: |
+          if [ -z "$YTDLP_PROXY" ]; then echo "::error::PROXY_URL secret is not set."; exit 1; fi
           python3 download_songs.py --list songs.txt --out ./downloads 2>&1 | tee run.log || true
-          rm -f cookies.txt
 
       - name: Zip results
         run: |
-          cd downloads && zip -r -0 ../songs.zip . && cd ..
+          cd downloads && (zip -0 ../songs.zip *.mp3 *.m4a *.opus *.mp4 *.mkv *.webm 2>/dev/null || echo "no media files") && cd ..
           ls -la songs.zip || echo "no zip"
 
       - name: Upload songs.zip artifact
@@ -85,10 +131,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          OK=$(ls downloads/*.mp3 2>/dev/null | wc -l | tr -d ' ')
-          FAIL=$(grep -c 'failed on all sources' run.log 2>/dev/null || echo 0)
+          OK=$(ls downloads/*.mp3 downloads/*.mp4 downloads/*.m4a downloads/*.webm downloads/*.mkv 2>/dev/null | wc -l | tr -d ' ')
+          KIND=$([ "$MODE" = "video" ] && echo "סרטונים" || echo "שירים")
           if [ "${OK:-0}" -gt 0 ]; then
-            gh issue comment "${{ github.event.issue.number }}" --body "$(printf '✅ מוכן! ירדו %s שירים (%s נכשלו).\n\n**להורדה:** פתח את הקישור, גלול למטה ל-**Artifacts** והורד את `songs.zip`:\n%s\n\nאפשר לסגור את ה-Issue.' "$OK" "$FAIL" "$RUN_URL")"
+            gh issue comment "${{ github.event.issue.number }}" --body "$(printf '✅ מוכן! ירדו %s %s.\n\n**להורדה:** פתח את הקישור, גלול למטה ל-**Artifacts** והורד את `songs.zip`:\n%s\n\nאפשר לסגור את ה-Issue.' "$OK" "$KIND" "$RUN_URL")"
           else
-            gh issue comment "${{ github.event.issue.number }}" --body "$(printf '⚠️ לא ירד אף שיר. בדוק את הרשימה או צפה בפירוט כאן: %s' "$RUN_URL")"
+            gh issue comment "${{ github.event.issue.number }}" --body "$(printf '⚠️ לא ירד כלום. בדוק את הרשימה או צפה בפירוט כאן: %s' "$RUN_URL")"
           fi
