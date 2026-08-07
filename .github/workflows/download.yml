@@ -1,8 +1,7 @@
 name: Download songs
 
-# Downloads songs from YouTube through a residential proxy (so YouTube treats
-# the request like a normal home user), zips them, and uploads songs.zip as an
-# artifact. Cookies are used too when available for extra reliability.
+# Downloads songs from SoundCloud (search by name), zips them, and uploads
+# songs.zip as an artifact to grab from the run page.
 on:
   workflow_dispatch:
   push:
@@ -27,28 +26,12 @@ jobs:
           python3 -m pip install --upgrade yt-dlp
           sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg zip
 
-      - name: Decrypt YouTube cookies (optional)
+      - name: Download songs (SoundCloud)
         env:
-          COOKIES_KEY: ${{ secrets.COOKIES_KEY }}
-        run: |
-          if [ -n "$COOKIES_KEY" ] && [ -f cookies.enc ]; then
-            openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
-              -pass pass:"$COOKIES_KEY" -in cookies.enc -out cookies.txt \
-              && echo "cookies ready" || echo "cookie decrypt failed; continuing without"
-          else
-            echo "no cookies configured; continuing without"
-          fi
-
-      - name: Download songs (YouTube)
-        env:
-          SOURCES: "yt"
-          YTDLP_PROXY: ${{ secrets.PROXY_URL }}
-          YTDLP_COOKIES: "cookies.txt"
-          YTDLP_EXTRACTOR_ARGS: "youtube:player_client=tv,web_safari,mweb,default"
+          SOURCES: "sc"
           DEBUG_SOURCES: "1"
         run: |
           python3 download_songs.py --list songs.txt --out ./downloads 2>&1 | tee run.log || true
-          rm -f cookies.txt
 
       - name: Zip results
         run: |
