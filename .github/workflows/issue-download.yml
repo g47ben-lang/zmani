@@ -1,13 +1,13 @@
 name: Download songs from issue
 
-# Self-service "website": open an issue with the "🎵 הורדה" form (label
-# "songs"), paste a list, and pick song (MP3) or video (MP4). This parses the
-# form, downloads the items from YouTube through the residential proxy
-# (PROXY_URL secret), zips them, uploads the zip as an artifact, and comments
-# back on the issue with the download link.
+# Self-service "website": open an issue with the "🎵 הורדה" form, paste a list,
+# and pick song (MP3) or video (MP4). This parses the form, downloads the items
+# from YouTube through the residential proxy (PROXY_URL secret), zips them,
+# uploads the zip as an artifact, and comments back with the download link.
+# Reopen the issue to run it again.
 on:
   issues:
-    types: [opened]
+    types: [opened, reopened]
 
 permissions:
   contents: read
@@ -15,11 +15,19 @@ permissions:
 
 jobs:
   download:
-    # Only run for issues opened by the repo owner and labeled "songs" — this
-    # keeps random visitors from triggering downloads on a public repo.
+    # Only the repo owner can trigger this (keeps random visitors on a public
+    # repo from starting downloads). We recognize a download request by the
+    # form's marker text OR the "songs" label — NOT the label alone, because a
+    # brand-new repo may not have the label yet (issue forms silently skip
+    # labels that don't exist), which would otherwise skip every run.
     if: >-
       github.event.issue.user.login == github.repository_owner &&
-      contains(github.event.issue.labels.*.name, 'songs')
+      (
+        contains(github.event.issue.labels.*.name, 'songs') ||
+        contains(github.event.issue.title, 'הורדה') ||
+        contains(github.event.issue.body, 'מה להוריד') ||
+        contains(github.event.issue.body, 'הרשימה')
+      )
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
