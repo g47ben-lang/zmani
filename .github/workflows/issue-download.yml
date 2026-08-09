@@ -76,13 +76,22 @@ jobs:
           if sections:
               fmt  = find("להוריד")                         # "מה להוריד?"
               res  = find("איכות")                          # video resolution
+              mind = find("אורך")                           # min length dropdown
               lst  = find("הרשימה") or find("פריט") or ""    # the list textarea
           else:
-              fmt, res, lst = "", "", body
+              fmt, res, mind, lst = "", "", "", body
 
           video = ("סרטון" in fmt) or ("MP4" in fmt) or ("mp4" in fmt.lower())
           res_digits = re.search(r"\d{3,4}", res)
           res = res_digits.group(0) if res_digits else "1080"
+
+          # Minimum length: the dropdown reads like "לפחות 10 דקות" / "לפחות שעה"
+          # / "בלי הגבלה". Convert to seconds (0 = no limit).
+          if "שעה" in mind:
+              min_dur = 3600
+          else:
+              mm = re.search(r"\d+", mind)
+              min_dur = int(mm.group(0)) * 60 if mm else 0
 
           # "_No response_" is what GitHub inserts for an empty optional field.
           if lst.strip() == "_No response_":
@@ -97,10 +106,11 @@ jobs:
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env:
               env.write(f"VIDEO={'1' if video else ''}\n")
               env.write(f"VIDEO_RES={res}\n")
+              env.write(f"MIN_DURATION={min_dur}\n")
               env.write(f"MODE={'video' if video else 'audio'}\n")
               env.write(f"song_count={count}\n")
 
-          print(f"mode={'video' if video else 'audio'} res={res} count={count}")
+          print(f"mode={'video' if video else 'audio'} res={res} min_dur={min_dur} count={count}")
           print("----- first lines -----")
           print("\n".join(lst.splitlines()[:10]))
           PY
@@ -115,7 +125,7 @@ jobs:
           SOURCES: "yt"
           YTDLP_PROXY: ${{ secrets.PROXY_URL }}
           DEBUG_SOURCES: "1"
-          # VIDEO / VIDEO_RES come from the parse step above (GITHUB_ENV).
+          # VIDEO / VIDEO_RES / MIN_DURATION come from the parse step (GITHUB_ENV).
         run: |
           if [ -z "$YTDLP_PROXY" ]; then echo "::error::PROXY_URL secret is not set."; exit 1; fi
           python3 download_songs.py --list songs.txt --out ./downloads 2>&1 | tee run.log || true

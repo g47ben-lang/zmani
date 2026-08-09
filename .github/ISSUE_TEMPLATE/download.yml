@@ -33,6 +33,22 @@ body:
     validations:
       required: false
 
+  - type: dropdown
+    id: min_duration
+    attributes:
+      label: "אורך מינימלי (דלג על קליפים קצרים)"
+      description: "בחר/י כדי לקבל את הגרסה הארוכה/המלאה במקום קליפ קצר. אם לפריט אין גרסה כזו — הוא ייכשל במקום להוריד קצר."
+      options:
+        - "בלי הגבלה"
+        - "לפחות 5 דקות"
+        - "לפחות 10 דקות"
+        - "לפחות 20 דקות"
+        - "לפחות 30 דקות"
+        - "לפחות שעה"
+      default: 0
+    validations:
+      required: false
+
   - type: textarea
     id: list
     attributes:
