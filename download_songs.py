@@ -32,6 +32,9 @@ Arguments:
                 is missing or the upload fails. Env: SEND_HOST.
     --zip-name  Name of the zip file created by --link. Default: songs.zip
     --quality   MP3 quality for ffmpeg (0 = best, 9 = smallest). Default: 0
+    --min-duration  Skip results shorter than N seconds and download the first
+                one that is long enough (e.g. 600 = at least 10 min). Useful to
+                get the full version instead of a short clip. Env: MIN_DURATION.
     --keep      Keep local files after a successful upload (default: delete).
     --upload-each  Upload each song right after it downloads (rclone only).
 
@@ -75,26 +78,48 @@ def require_tool(name: str) -> None:
 # datacenter IPs with a bot check; SoundCloud is a resilient fallback that
 # does not block cloud runners. Override with the SOURCES env var, e.g.
 # SOURCES="yt,sc" (default) or SOURCES="sc" to skip YouTube entirely.
-SEARCH_PREFIXES = {
-    "yt": "ytsearch1:",   # YouTube
-    "sc": "scsearch1:",   # SoundCloud
+SEARCH_ENGINES = {
+    "yt": "ytsearch",   # YouTube
+    "sc": "scsearch",   # SoundCloud
 }
+SEARCH_LABELS = {"yt": "YouTube", "sc": "SoundCloud"}
+
+# How many candidates to pull per search when a duration filter is active. We
+# need more than one so yt-dlp can skip the short clips and reach a long one.
+DEFAULT_SEARCH_COUNT = 20
 
 
 def _try_download(query: str, out_dir: Path, quality: str,
-                  video: bool = False, video_res: str | None = None) -> Path | None:
+                  video: bool = False, video_res: str | None = None,
+                  min_duration: int = 0) -> Path | None:
     """Run yt-dlp for a single search query. Returns the file path or None.
 
     In audio mode (default) the result is an MP3. In video mode (`video=True`)
     the full video is downloaded and merged into a single MP4, optionally
     capped at a max height via `video_res` (e.g. "1080").
+
+    When `min_duration` (seconds) is set, yt-dlp skips any result shorter than
+    that and downloads the first one that is long enough — so you get the full
+    version, not a short clip. The caller must pass a multi-result search query
+    (e.g. "ytsearch20:...") so there are candidates to filter through.
     """
     out_template = str(out_dir / "%(title)s [%(id)s].%(ext)s")
 
-    cmd = [
-        "yt-dlp",
-        query,
-        "--no-playlist",
+    cmd = ["yt-dlp", query]
+    # `--no-playlist` collapses a search to a single result, which would defeat
+    # the duration filter (nothing left to skip to). Only use it when we are
+    # NOT filtering by length.
+    if min_duration <= 0:
+        cmd += ["--no-playlist"]
+    else:
+        # Skip results shorter than the threshold, stop after the first that
+        # passes. `--max-downloads 1` makes yt-dlp exit as soon as one long
+        # enough result is fetched (handled as success below).
+        cmd += [
+            "--match-filter", f"duration >= {min_duration}",
+            "--max-downloads", "1",
+        ]
+    cmd += [
         "--retries", "8",
         "--fragment-retries", "8",
         "--extractor-retries", "3",
@@ -153,15 +178,21 @@ def _try_download(query: str, out_dir: Path, quality: str,
         cmd += ["--proxy", proxy]
 
     result = subprocess.run(cmd, capture_output=True, text=True)
+
+    # Parse the printed filepath first, regardless of exit code: with
+    # `--max-downloads 1` yt-dlp exits non-zero (code 101, "max downloads
+    # reached") even though the download succeeded. If a real file was
+    # produced, that's a success.
+    lines = [ln.strip() for ln in result.stdout.splitlines() if ln.strip()]
+    if lines:
+        path = Path(lines[-1])
+        if path.exists():
+            return path
+
     if result.returncode != 0:
         err = (result.stderr or "").strip().splitlines()
         return None if not err else (_Fail(err[-1]))  # carry last error line
-
-    lines = [ln.strip() for ln in result.stdout.splitlines() if ln.strip()]
-    if not lines:
-        return None
-    path = Path(lines[-1])
-    return path if path.exists() else None
+    return None
 
 
 class _Fail(str):
@@ -170,11 +201,15 @@ class _Fail(str):
 
 
 def download_song(song: str, out_dir: Path, quality: str,
-                  video: bool = False, video_res: str | None = None) -> Path | None:
+                  video: bool = False, video_res: str | None = None,
+                  min_duration: int = 0) -> Path | None:
     """
     Search each configured source (YouTube, then SoundCloud) for `song` and
     download the first result — as MP3 (default) or as a merged MP4 when
     `video=True`. Returns the file path, or None if every source failed.
+
+    When `min_duration` (seconds) is set, short clips are skipped and the first
+    result at least that long is downloaded instead.
     """
     order = [s.strip() for s in os.environ.get("SOURCES", "yt,sc").split(",") if s.strip()]
     # SoundCloud has no video; in video mode only search sources that carry it.
@@ -182,13 +217,21 @@ def download_song(song: str, out_dir: Path, quality: str,
         order = [s for s in order if s == "yt"] or ["yt"]
     last_err = ""
 
+    # With a duration filter we need several candidates to skip past the short
+    # clips; without one, the single top result is enough.
+    count = DEFAULT_SEARCH_COUNT if min_duration > 0 else 1
+
     for src in order:
-        prefix = SEARCH_PREFIXES.get(src)
-        if not prefix:
+        engine = SEARCH_ENGINES.get(src)
+        if not engine:
             continue
-        label = {"yt": "YouTube", "sc": "SoundCloud"}.get(src, src)
-        print(f"  -> searching {label}: {song}")
-        outcome = _try_download(f"{prefix}{song}", out_dir, quality, video, video_res)
+        label = SEARCH_LABELS.get(src, src)
+        query = f"{engine}{count}:{song}"
+        if min_duration > 0:
+            print(f"  -> searching {label} (>= {min_duration}s): {song}")
+        else:
+            print(f"  -> searching {label}: {song}")
+        outcome = _try_download(query, out_dir, quality, video, video_res, min_duration)
         if isinstance(outcome, Path):
             print(f"  [ok] {outcome.name}  (via {label})")
             return outcome
@@ -308,6 +351,11 @@ def main() -> int:
                         help="Download the full video (MP4) instead of extracting audio.")
     parser.add_argument("--video-res", default=os.environ.get("VIDEO_RES"),
                         help='Cap video height, e.g. "720" or "1080" (video mode only).')
+    parser.add_argument("--min-duration", type=int,
+                        default=int(os.environ.get("MIN_DURATION") or 0),
+                        help="Skip results shorter than this many SECONDS and "
+                             "download the first long-enough one (e.g. 600 = "
+                             "at least 10 minutes). Env: MIN_DURATION.")
     parser.add_argument("--keep", action="store_true", help="Keep local files after upload.")
     parser.add_argument("--upload-each", action="store_true", help="Upload each song right after download (rclone only).")
     args = parser.parse_args()
@@ -333,14 +381,16 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     kind = "video (MP4)" if video else "audio (MP3)"
-    print(f"Found {len(songs)} item(s). Downloading as {kind} into '{out_dir}'.\n")
+    length_note = f", min length {args.min_duration}s" if args.min_duration > 0 else ""
+    print(f"Found {len(songs)} item(s). Downloading as {kind}{length_note} into '{out_dir}'.\n")
 
     downloaded: list[Path] = []
     failed: list[str] = []
 
     for i, song in enumerate(songs, 1):
         print(f"[{i}/{len(songs)}] {song}")
-        path = download_song(song, out_dir, args.quality, video, args.video_res)
+        path = download_song(song, out_dir, args.quality, video,
+                             args.video_res, args.min_duration)
         if path is None:
             failed.append(song)
             continue
