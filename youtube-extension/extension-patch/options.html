@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SaveBridge — הגדרות</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main class="wrap">
+      <header class="hd">
+        <div class="hd__logo" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="24" height="24">
+            <path fill="currentColor" d="M17 18v1.5H7V18h10zM12 3v9.4l3.2-3.2 1.06 1.06L11.99 15 7.74 10.32 8.8 9.26 12 12.4V3z" />
+          </svg>
+        </div>
+        <div>
+          <h1 id="title">SaveBridge</h1>
+          <p class="muted" id="subtitle"></p>
+          <p class="muted small" id="version"></p>
+        </div>
+      </header>
+
+      <!-- Your download server (free relay) -->
+      <section class="card">
+        <h2 id="serverTitle"></h2>
+        <div class="field">
+          <label class="field__label" for="serverUrl" id="serverUrlLabel"></label>
+          <input id="serverUrl" class="input" style="min-width: 260px" placeholder="https://xxxx.trycloudflare.com" dir="ltr" />
+        </div>
+        <div class="field">
+          <label class="field__label" for="serverToken" id="serverTokenLabel"></label>
+          <input id="serverToken" class="input" dir="ltr" />
+        </div>
+        <div class="row">
+          <button class="btn btn--primary" id="saveServer"></button>
+        </div>
+        <div class="msg" id="serverMsg"></div>
+      </section>
+
+      <!-- Server connection status -->
+      <section class="card">
+        <h2 id="connectionTitle"></h2>
+        <div class="conn">
+          <span class="dot" id="conn-dot"></span>
+          <div class="conn__main">
+            <div id="conn-text"></div>
+          </div>
+          <button class="btn" id="recheck"></button>
+        </div>
+      </section>
+
+      <!-- Preferences -->
+      <section class="card">
+        <h2 id="prefsTitle"></h2>
+
+        <div class="field">
+          <label class="field__label" for="buttonText" id="buttonTextLabel"></label>
+          <input id="buttonText" class="input" maxlength="24" />
+        </div>
+
+        <div class="field">
+          <label class="field__label" for="defaultOption" id="defaultOptionLabel"></label>
+          <select id="defaultOption" class="input"></select>
+        </div>
+
+        <div class="field">
+          <label class="field__label" for="debug" id="debugLabel"></label>
+          <input type="checkbox" id="debug" class="switch" />
+        </div>
+      </section>
+
+      <!-- Advanced -->
+      <section class="card">
+        <h2 id="advancedTitle"></h2>
+        <div class="row">
+          <button class="btn btn--danger" id="reset"></button>
+        </div>
+      </section>
+
+      <!-- Server help -->
+      <section class="card">
+        <h2 id="installTitle"></h2>
+        <p class="muted small" id="installBody"></p>
+      </section>
+    </main>
+
+    <div class="toast" id="toast" hidden></div>
+    <script src="options.js"></script>
+  </body>
+</html>

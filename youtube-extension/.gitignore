@@ -1,0 +1,8 @@
+# local server runtime
+server/.venv/
+server/__pycache__/
+__pycache__/
+*.pyc
+savebridge/
+downloads/
+cloudflared

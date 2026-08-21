@@ -1,0 +1,71 @@
+{
+  "manifest_version": 3,
+  "name": "SaveBridge",
+  "version": "0.4.5",
+  "description": "מוסיף כפתור הורדה ל-YouTube ומוריד דרך שרת SaveBridge חינמי משלך.",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "action": {
+    "default_title": "SaveBridge",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.youtube.com/*",
+        "https://*.google.com/*",
+        "https://*.google.co.il/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "content.css"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.youtube.com/*"
+      ],
+      "js": [
+        "injected.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    }
+  ],
+  "permissions": [
+    "storage",
+    "notifications",
+    "downloads",
+    "cookies",
+    "offscreen",
+    "nativeMessaging",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://*.youtube.com/*",
+    "https://*.google.com/*",
+    "https://*.trycloudflare.com/*",
+    "https://*.run.app/*",
+    "https://*.loca.lt/*",
+    "https://*.ngrok-free.app/*",
+    "https://*.ngrok.io/*"
+  ],
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAw2gYFbYaDzAd/NyxLR8RLkoLKt2VVYjHQlgsmfOBxsDgSMKN1BXFfbGE1AR2kjt6p7G/O2/uR66RQnrKPxzcsOQIwrigX3f8+6eohSUKc1CobYbcaLg2E2DBdbBL4sj8LS5i+yqGsFNqceZj44QjM+FMnJyLDxbUGN8AZKKORqQA3dqe4y7ovSazGJbq+1oPPfyYcCEtopohCRb07RaNiibFkNe8gWjlQOj8xh6xYzCMzZLBtJcVlG+fi0frVAPl8Zr/fdgr761LZEll8YMHrnZB4zXGmIPuM3VaV0R1i4+ReCzlo61tbGnQPXDAlVplLrksw4FDwg+8hUeBn8iDUQIDAQAB"
+}
